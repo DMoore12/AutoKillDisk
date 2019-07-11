@@ -1,12 +1,14 @@
-    
 import sys
 import os
 import random
 from PySide2.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QGridLayout, QLineEdit, QSpacerItem, QRadioButton, QGroupBox, QProgressBar)
-from PySide2.QtCore import Slot, Qt
+from PySide2.QtCore import Slot, Qt, QThread
 #import psutil
 #from psutil._common import bytes2human
 import wmi
+import subprocess
+import time
+from threading import Timer
 
 class mainScreen(QWidget):
     def __init__(self):
@@ -22,6 +24,7 @@ class mainScreen(QWidget):
         self.wipeButton = QPushButton('Wipe')
         self.cancelButton = QPushButton('Cancel')
         self.bottomStatus = QLabel('Ready to Wipe')
+        self.refactor = QPushButton('Refactor')
 
         # TODO: Add a group box to make this look better
         # EDIT TODO: Use GUI application to build a really good looking app!
@@ -36,10 +39,10 @@ class mainScreen(QWidget):
         self.layout.addWidget(self.indexLabel, 0, 8)
         self.layout.addWidget(self.checkLabel, 0, 9)
         self.layout.addWidget(self.progress, 26, 0, 1, 10)
-        self.layout.addWidget(self.wipeButton, 27, 0, 1, 2)
-        self.layout.addWidget(self.cancelButton, 27, 2, 1, 2)
+        self.layout.addWidget(self.wipeButton, 27, 2, 1, 2)
+        self.layout.addWidget(self.cancelButton, 27, 4, 1, 2)
         self.layout.addWidget(self.bottomStatus, 28, 0, 1, 10)
-
+        self.layout.addWidget(self.refactor, 27, 0, 1, 2)
         self.drivesSet = 0
         self.driveNames = []
         self.driveStatus = []
@@ -47,6 +50,8 @@ class mainScreen(QWidget):
         self.drivePartitions = []
         self.driveIndex = []
         self.masterRadio = []
+        self.master = self.getMaster()
+        self.progressInt = 10
         for i in range(25):
             toAdd = QLabel('')
             self.driveNames.append(toAdd)
@@ -63,6 +68,7 @@ class mainScreen(QWidget):
         #icon = 
         #self.setWindowIcon()
         self.wipeButton.clicked.connect(self.startButtonClicked)
+        self.refactor.clicked.connect(self.refactorDrives)
 
     def addDrive(self, name, status, size, partitions, index):
         self.driveNames[self.drivesSet].setText(name)
@@ -73,6 +79,8 @@ class mainScreen(QWidget):
         toSet = QRadioButton()
         self.masterRadio.append(toSet)
         self.layout.addWidget(self.masterRadio[self.drivesSet], self.drivesSet + 1, 9)
+        if int(index) == int(self.master):
+            self.masterRadio[self.drivesSet].setChecked(True)
         self.drivesSet += 1       
 
     def addPayloadNames(self):
@@ -89,10 +97,13 @@ class mainScreen(QWidget):
     def startButtonClicked(self):
         self.bottomStatus.setText('Are you sure you want to wipe?')
         self.confirmButton = QPushButton('Confirm')
-        self.layout.addWidget(self.confirmButton, 27, 4, 1, 2)
+        self.layout.addWidget(self.confirmButton, 27, 6, 1, 2)
         self.setLayout(self.layout)
 
         self.confirmButton.clicked.connect(self.getIndex)
+
+    def setText(self):
+        self.bottomStatus.setText('Ready to Wipe')
 
     def getIndex(self):
         self.confirmButton.deleteLater()
@@ -100,30 +111,80 @@ class mainScreen(QWidget):
         self.indexToWipe = []
         self.serialToWipe = []
         for i in range(len(self.masterRadio)):
-            # TODO: Figure out which index is the master so we don't wipe it
-            if self.masterRadio[i].isChecked():
-                self.driveStatus[i].setText('MASTER')
-            else:
+            if not self.masterRadio[i].isChecked():
                 self.indexToWipe.append(self.index[i])
                 self.serialToWipe.append(self.serial[i])
-                self.driveStatus[i].setText('WIPING')
         if len(self.indexToWipe) == len(self.index):
             self.bottomStatus.setText('Error: No master drive selected!')
-
-            # TODO: Write the refactoring function
-
             self.refactorDrives()
+            t = Timer(3, self.setText)
+            t.start()
             return None
-        if len(self.indexToWipe) != 0:
+        elif len(self.indexToWipe) == 0:
+            self.refactorDrives()
+            self.bottomStatus.setText('No drives available to wipe!')
+            t = Timer(3, self.setText)
+            t.start()
+        else:
             serialString = self.serialToWipe[0]
             for i in range(1, len(self.serialToWipe)):
                 serialString += ', ' + self.serialToWipe[i]
             self.bottomStatus.setText('Wiping Drives:' + serialString)
-            self.progress.setValue(10)
+            self.progress.setValue(self.progressInt)
+            for i in range(len(self.masterRadio)):
+                # TODO: Figure out which index is the master so we don't wipe it
+                if self.masterRadio[i].isChecked():
+                    self.driveStatus[i].setText('MASTER')
+                else:
+                    self.driveStatus[i].setText('WIPING')
             wipeDrives(self, self.indexToWipe)
 
     def refactorDrives(self):
-        print('Still need to write this!')
+        self.driveNames = []
+        self.driveStatus = []
+        self.drivesSet = 0
+        self.driveSize = []
+        self.drivePartitions = []
+        self.driveIndex = []
+        self.masterRadio = []
+        for i in range(25):
+            toAdd = QLabel('')
+            self.driveNames.append(toAdd)
+            toAdd2 = QLabel('')
+            self.driveSize.append(toAdd2)
+            toAdd3 = QLabel('')
+            self.driveStatus.append(toAdd3)
+            toAdd4 = QLabel('')
+            self.drivePartitions.append(toAdd4)
+            toAdd5 = QLabel('')
+            self.driveIndex.append(toAdd5)
+        getDisks(self)
+        self.addPayloadNames()
+
+    def getMaster(self):
+        exists = os.path.isfile('config.txt')
+        if not exists:
+            self.bottomStatus.setText('Error: Config file not found. Defaulting to master drive with index 0.')
+            t = Timer(5, self.setText)
+            t.start()
+            return 0
+        with open('config.txt', 'r') as fh:
+            for line in fh:
+                toSet = line.strip(' ')
+        self.bottomStatus.setText('Loading complete')
+        t = Timer(5, self.setText)
+        t.start()
+        return toSet
+
+class refactorThread(QThread):
+    def __init__(self):
+        QThread.__init__(self)
+
+    def __del__(self):
+        self.wait()
+    
+    def run(self, window):
+        window.refactorDrives()
 
 #Comes from https://github.com/giampaolo/psutil/blob/master/scripts/disk_usage.py
 def getDisks(window):
@@ -138,13 +199,37 @@ def getDisks(window):
         window.serial.append(pm.SerialNumber.strip(' '))
 
 def wipeDrives(parent, indexList):
+    print('Running')
+    initialFiles = fileCount()
     increment = 90 / len(indexList)
     for index in indexList:
-        #string = 'KillDisk -erasemethod=[3] -passes=[3] -verification=[10] -retryattempts=[5] -wipehdd[' + index.strip(' ') + '] -noconfirmation'
-        string = 'KillDisk.exe -erasemethod=[3] -passes=[3] -verification=[10] -retryattempts=[5] -wipehdd[' + str(index) + '] -noconfirmation\n'
-        # TODO: Get abs path of KillDisk and use shortened versions of flags
-        print(string)
-        os.system(string)
+        #string = 'KillDisk -erasemethod=[3] -passes=[3] -verification=[10] -retryattempts=[5] -wipehdd=[' + index.strip(' ') + '] -noconfirmation'
+        string = 'C:/"Program Files"/"LSoft Technologies"/"Active@ KillDisk Ultimate 11"/KillDisk.exe -erasemethod=3 -passes=3 -verification=10 -retryattempts=5 -erasehdd=' + str(index) + ' -cp=C:/Users/%USERNAME%/Desktop/"Certificate Output"/ -nc -bm\n'
+        p = subprocess.Popen(string, stdout = subprocess.PIPE, shell = True)
+        (output, err) = p.communicate()
+        p_status = p.wait()
+        files = fileCount()
+        if not files == initialFiles:
+            self.progressInt += increment
+            self.progress.setValue(self.progressInt)
+            initialFiles += 1
+        else:
+            toBreak = False
+            while not toBreak:
+                time.sleep(3000)
+                files = fileCount()
+                if fileCount == initialFiles:
+                    self.progressInt += increment
+                    self.progress.setValue(self.progressInt)
+                    initialFiles += 1
+                    toBreak = True
+                    break
+
+def fileCount():
+    fileCount = 0
+    for _, dirs, files in os.walk('C:/Users/%USERNAME%/Desktop/"Certificate Output"/'):
+        fileCount += len(files)
+    return fileCount
 
 if __name__ == '__main__':
     main = QApplication(sys.argv)
