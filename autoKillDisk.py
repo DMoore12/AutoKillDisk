@@ -2,13 +2,20 @@ import sys
 import os
 import random
 from PySide2.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QGridLayout, QLineEdit, QSpacerItem, QRadioButton, QGroupBox, QProgressBar)
-from PySide2.QtCore import Slot, Qt, QThread
+from PySide2.QtCore import Slot, Qt, QThread, QObject, pyqtSignal
 #import psutil
 #from psutil._common import bytes2human
 import wmi
 import subprocess
 import time
-from threading import Timer
+from threading import Timer, Thread
+import pythoncom
+
+# Possible fix to the threading issue: https://stackoverflow.com/questions/36434706/pyqt-proper-use-of-emit-and-pyqtsignal
+# Also, checkout fbs installer
+# Also, https://pythonprogramming.net/menubar-pyqt-tutorial/?completed=/button-functions-pyqt-tutorial/
+# Also, possible fix two: https://www.riverbankcomputing.com/static/Docs/PyQt5/signals_slots.html
+# TODO: Create a proper build script
 
 class mainScreen(QWidget):
     def __init__(self):
@@ -76,8 +83,8 @@ class mainScreen(QWidget):
         self.driveSize[self.drivesSet].setText(size + ' GB')
         self.drivePartitions[self.drivesSet].setText(str(partitions))
         self.driveIndex[self.drivesSet].setText(str(index))
-        toSet = QRadioButton()
-        self.masterRadio.append(toSet)
+        toAdd = QRadioButton()
+        self.masterRadio.append(toAdd)
         self.layout.addWidget(self.masterRadio[self.drivesSet], self.drivesSet + 1, 9)
         if int(index) == int(self.master):
             self.masterRadio[self.drivesSet].setChecked(True)
@@ -140,13 +147,19 @@ class mainScreen(QWidget):
             wipeDrives(self, self.indexToWipe)
 
     def refactorDrives(self):
-        self.driveNames = []
-        self.driveStatus = []
-        self.drivesSet = 0
-        self.driveSize = []
-        self.drivePartitions = []
-        self.driveIndex = []
+        pythoncom.CoInitialize()
+        for i in range(len(self.driveNames)):
+            self.driveNames[i].setText('')
+            self.driveStatus[i].setText('')
+            self.driveSize[i].setText('')
+            self.drivePartitions[i].setText('')
+            self.driveIndex[i].setText('')
+        for i in range(len(self.masterRadio)):
+            self.masterRadio[i].deleteLater()
+        self.setLayout(self.layout)
+        del self.masterRadio
         self.masterRadio = []
+        self.drivesSet = 0
         for i in range(25):
             toAdd = QLabel('')
             self.driveNames.append(toAdd)
@@ -158,11 +171,14 @@ class mainScreen(QWidget):
             self.drivePartitions.append(toAdd4)
             toAdd5 = QLabel('')
             self.driveIndex.append(toAdd5)
+        self.addPayloadNames()
+        self.setLayout(self.layout)
         getDisks(self)
         self.addPayloadNames()
+        self.setLayout(self.layout)
 
     def getMaster(self):
-        exists = os.path.isfile('config.txt')
+        exists = os.path.isfile('C:/config.txt')
         if not exists:
             self.bottomStatus.setText('Error: Config file not found. Defaulting to master drive with index 0.')
             t = Timer(5, self.setText)
@@ -175,16 +191,25 @@ class mainScreen(QWidget):
         t = Timer(5, self.setText)
         t.start()
         return toSet
-
-class refactorThread(QThread):
-    def __init__(self):
-        QThread.__init__(self)
-
-    def __del__(self):
-        self.wait()
     
-    def run(self, window):
-        window.refactorDrives()
+    @pyqtSlot(int)
+    def startRefactor(self):
+        self.refactorDrives()
+
+class refactorThread(Thread):
+    def __init__(self, window):
+        Thread.__init__(self)
+        self.window = window
+        self.daemon = True
+        self.start()
+    
+    def run(self):
+        while True:
+            self.window.refactorDrives()
+
+class refSignal(QtCore.QObject):
+    sig = pyqtSignal()
+    self.sig.emit(1)
 
 #Comes from https://github.com/giampaolo/psutil/blob/master/scripts/disk_usage.py
 def getDisks(window):
@@ -204,7 +229,7 @@ def wipeDrives(parent, indexList):
     increment = 90 / len(indexList)
     for index in indexList:
         #string = 'KillDisk -erasemethod=[3] -passes=[3] -verification=[10] -retryattempts=[5] -wipehdd=[' + index.strip(' ') + '] -noconfirmation'
-        string = 'C:/"Program Files"/"LSoft Technologies"/"Active@ KillDisk Ultimate 11"/KillDisk.exe -erasemethod=3 -passes=3 -verification=10 -retryattempts=5 -erasehdd=' + str(index) + ' -cp=C:/Users/%USERNAME%/Desktop/"Certificate Output"/ -nc -bm\n'
+        string = 'C:/"Program Files"/"LSoft Technologies"/"Active@ KillDisk Ultimate 11"/KillDisk.exe -erasemethod=3 -passes=3 -verification=25 -retryattempts=5 -erasehdd=' + str(index) + ' -cp=C:/Users/%USERNAME%/Desktop/"Certificate Output"/ -nc -bm\n'
         p = subprocess.Popen(string, stdout = subprocess.PIPE, shell = True)
         (output, err) = p.communicate()
         p_status = p.wait()
@@ -241,6 +266,8 @@ if __name__ == '__main__':
     window.addPayloadNames()
     window.setLayout(window.layout)
     window.setFixedSize(500, 600)
+
+    refThread = refactorThread(window)
 
     window.show()
 
