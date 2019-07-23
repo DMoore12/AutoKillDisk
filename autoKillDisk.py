@@ -2,7 +2,8 @@ import sys
 import os
 import random
 from PySide2.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QGridLayout, QLineEdit, QSpacerItem, QRadioButton, QGroupBox, QProgressBar)
-from PySide2.QtCore import Slot, Qt, QThread, QObject, pyqtSignal
+from PySide2 import QtCore
+#from PySide2.QtCore import Slot, Qt, QThread, QObject
 #import psutil
 #from psutil._common import bytes2human
 import wmi
@@ -76,6 +77,10 @@ class mainScreen(QWidget):
         #self.setWindowIcon()
         self.wipeButton.clicked.connect(self.startButtonClicked)
         self.refactor.clicked.connect(self.refactorDrives)
+
+        self.worker = refactorThread()
+        self.worker.refSig.connect(self.refactorDrives)
+        self.worker.start()
 
     def addDrive(self, name, status, size, partitions, index):
         self.driveNames[self.drivesSet].setText(name)
@@ -178,7 +183,7 @@ class mainScreen(QWidget):
         self.setLayout(self.layout)
 
     def getMaster(self):
-        exists = os.path.isfile('C:/config.txt')
+        exists = os.path.isfile('config.txt')
         if not exists:
             self.bottomStatus.setText('Error: Config file not found. Defaulting to master drive with index 0.')
             t = Timer(5, self.setText)
@@ -191,25 +196,18 @@ class mainScreen(QWidget):
         t = Timer(5, self.setText)
         t.start()
         return toSet
-    
-    @pyqtSlot(int)
-    def startRefactor(self):
-        self.refactorDrives()
 
-class refactorThread(Thread):
-    def __init__(self, window):
-        Thread.__init__(self)
-        self.window = window
-        self.daemon = True
-        self.start()
-    
+class refactorThread(QtCore.QThread):
+    refSig = QtCore.Signal()
+
+    def __init__(self):
+            QtCore.QThread.__init__(self)
+
     def run(self):
-        while True:
-            self.window.refactorDrives()
-
-class refSignal(QtCore.QObject):
-    sig = pyqtSignal()
-    self.sig.emit(1)
+            while True:
+                self.refSig.emit()
+                # Make sure the time doesn't go much lower than 1 or the application will stop responding
+                time.sleep(1)
 
 #Comes from https://github.com/giampaolo/psutil/blob/master/scripts/disk_usage.py
 def getDisks(window):
@@ -229,7 +227,7 @@ def wipeDrives(parent, indexList):
     increment = 90 / len(indexList)
     for index in indexList:
         #string = 'KillDisk -erasemethod=[3] -passes=[3] -verification=[10] -retryattempts=[5] -wipehdd=[' + index.strip(' ') + '] -noconfirmation'
-        string = 'C:/"Program Files"/"LSoft Technologies"/"Active@ KillDisk Ultimate 11"/KillDisk.exe -erasemethod=3 -passes=3 -verification=25 -retryattempts=5 -erasehdd=' + str(index) + ' -cp=C:/Users/%USERNAME%/Desktop/"Certificate Output"/ -nc -bm\n'
+        string = 'C:/"Program Files"/"LSoft Technologies"/"Active@ KillDisk Ultimate 11"/KillDisk.exe -erasemethod=2 -passes=3 -verification=25 -retryattempts=5 -erasehdd=' + str(index) + ' -cp=C:/Users/%USERNAME%/Desktop/"Certificate Output"/ -nc -bm\n'
         p = subprocess.Popen(string, stdout = subprocess.PIPE, shell = True)
         (output, err) = p.communicate()
         p_status = p.wait()
@@ -266,8 +264,6 @@ if __name__ == '__main__':
     window.addPayloadNames()
     window.setLayout(window.layout)
     window.setFixedSize(500, 600)
-
-    refThread = refactorThread(window)
 
     window.show()
 
