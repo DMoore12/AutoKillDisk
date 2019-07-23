@@ -10,7 +10,7 @@ packages = ['os', 'sys', 'random', 'PySide2', 'wmi', 'subprocess', 'time', 'thre
 
 setup(
     name = "Auto Kill Disk",
-    description = 'Automatically view, refactor, and wipe drives using Auto@ Kill Disk',
+    description = 'Automatic Drive Wipe Utility',
     version = __version__,
     options = {"build_exe": {
     #'packages': packages,
